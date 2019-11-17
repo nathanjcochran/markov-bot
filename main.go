@@ -410,7 +410,7 @@ func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]b
 			log.Printf("Message received: %v\n", ev.Text)
 			rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
 			response := chain.Generate(ev.Text, stopwords)
-			time.Sleep(time.Second / 4)
+			time.Sleep(time.Second / 3)
 			log.Printf("Response: %v\n", response)
 			rtm.SendMessage(rtm.NewOutgoingMessage(
 				response,
