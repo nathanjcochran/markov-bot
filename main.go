@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/nlopes/slack"
 )
@@ -31,10 +32,10 @@ var (
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
 	sentenceLen      = flag.Int("sentence-length", 5, "Minimum sentence length, unless there are no other options")
 	sentenceAttempts = flag.Int("sentence-attempts", 5, "Number of times to try building a sentence longer than minimum")
-
-	cache       = flag.String("cache", "./cache", "Cache directory")
-	buffer      = flag.Int("buffer", 1000, "Buffer size")
-	concurrency = flag.Int("concurrency", 3, "Concurrency")
+	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
+	cache            = flag.String("cache", "./cache", "Cache directory")
+	buffer           = flag.Int("buffer", 1000, "Buffer size")
+	concurrency      = flag.Int("concurrency", 3, "Concurrency")
 )
 
 func main() {
@@ -66,10 +67,11 @@ func main() {
 		log.Fatalf("Error fetching user by email: %s", err)
 	}
 
+	stopwords := readStopwords()
 	channels := fetchChannels(userClient)
 	msgs := fetchChannelHistories(userClient, user, channels)
 	chain := buildMarkovChain(msgs)
-	startBot(botClient, chain)
+	startBot(botClient, chain, stopwords)
 
 	log.Printf("Goodbye!")
 }
@@ -227,7 +229,17 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 	//}
 
 	for msg := range msgs {
-		tokens := strings.Fields(msg)
+		tokens := strings.FieldsFunc(msg, func(r rune) bool {
+			if unicode.IsSpace(r) {
+				return true
+			}
+			switch r {
+			case ';', '`', '[', ']', '{', '}', '(', ')', '|', ',', '"':
+				return true
+			default:
+				return false
+			}
+		})
 
 		prefixes := [][]string{}
 		for i := 0; i < *prefixLen; i++ {
@@ -235,6 +247,9 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 		}
 
 		for _, token := range tokens {
+			if token == "" {
+				continue
+			}
 			for i := 0; i < *prefixLen; i++ {
 				prefix := prefixes[i]
 				if len(prefix) > i {
@@ -272,24 +287,38 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 	return chain
 }
 
-func (c MarkovChain) Generate() string {
-	var out []string
+func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
+	// Choose starting prefix
+	var (
+		words  = shuffledWords(input, stopwords)
+		prefix = []string{startToken}
+		out    []string
+	)
+	for _, word := range words {
+		if c[word] != nil {
+			log.Printf("Using input word as prefix: %s", word)
+			prefix = []string{startToken, word}
+			out = append(out, word)
+			break
+		}
+	}
 
-	prefix := []string{startToken}
-	var attempts int
+	var (
+		attempts int
+	)
 	for {
 		key := strings.ToLower(strings.Join(prefix, " "))
 		opts := c[key]
 
 		log.Printf("Key: '%s' Prefix: %d Opts: %d", key, len(prefix), len(opts))
-		if len(opts) < *optionMin && len(prefix) > *prefixMin {
+		if len(opts) == 0 || (len(opts) < *optionMin && len(prefix) > *prefixMin) {
 			log.Printf("Too few options: %d; Prefix length: %d", len(opts), len(prefix))
-			prefix = prefix[1:]
+			prefix = prefix[1:] // Use a shorter prefix
 			continue
 		}
 
-		choice := opts[rand.Intn(len(opts))]
-		if choice == endToken {
+		word := opts[rand.Intn(len(opts))]
+		if word == endToken {
 			if len(out) == 0 {
 				log.Printf("No tokens - trying again")
 				continue
@@ -300,15 +329,49 @@ func (c MarkovChain) Generate() string {
 			}
 			return strings.Join(out, " ")
 		}
-		prefix = append(prefix, choice)
+		prefix = append(prefix, word)
 		if len(prefix) > *prefixLen {
 			prefix = prefix[1:]
 		}
-		out = append(out, choice)
+		out = append(out, word)
 	}
 }
 
-func startBot(botClient *slack.Client, chain MarkovChain) {
+func readStopwords() map[string]bool {
+	log.Println("Reading stopwords file: %s", *stopwordsFile)
+	file, err := os.Open(*stopwordsFile)
+	if err != nil {
+		log.Fatalf("Error opening stopwords file: %s", err)
+	}
+	defer file.Close()
+
+	stopwords := map[string]bool{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		stopwords[scanner.Text()] = true
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error scanning cache file: %s", err)
+	}
+
+	return stopwords
+}
+
+func shuffledWords(text string, stopwords map[string]bool) []string {
+	var words []string
+	for _, word := range strings.Fields(text) {
+		if stopwords[word] {
+			continue
+		}
+		words = append(words, word)
+	}
+	rand.Shuffle(len(words), func(i, j int) {
+		words[i], words[j] = words[j], words[i]
+	})
+	return words
+}
+
+func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]bool) {
 	log.Printf("Starting bot")
 	rtm := botClient.NewRTM()
 	go rtm.ManageConnection()
@@ -324,17 +387,24 @@ func startBot(botClient *slack.Client, chain MarkovChain) {
 			}
 
 			log.Printf("Message received: %v\n", ev.Text)
-			response := chain.Generate()
+			rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
+			response := chain.Generate(ev.Text, stopwords)
+			time.Sleep(time.Second / 2)
 			log.Printf("Response: %v\n", response)
-			channelID, timestamp, err := botClient.PostMessage(
+			rtm.SendMessage(rtm.NewOutgoingMessage(
+				response,
 				ev.Channel,
-				slack.MsgOptionText(response, false),
-			)
-			if err != nil {
-				log.Printf("Error posting message: %s\n", err)
-			} else {
-				log.Printf("Message successfully sent to channel %s at %s", channelID, timestamp)
-			}
+			))
+			log.Printf("Message successfully sent to channel %ss", ev.Channel)
+		//	channelID, timestamp, err := botClient.PostMessage(
+		//		ev.Channel,
+		//		slack.MsgOptionText(response, false),
+		//	)
+		//	if err != nil {
+		//		log.Printf("Error posting message: %s\n", err)
+		//	} else {
+		//		log.Printf("Message successfully sent to channel %s at %s", channelID, timestamp)
+		//	}
 		case *slack.LatencyReport:
 			log.Printf("Current latency: %v\n", ev.Value)
 		case *slack.RTMError:
