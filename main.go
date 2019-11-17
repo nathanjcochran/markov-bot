@@ -119,7 +119,7 @@ func fetchChannels(client *slack.Client) <-chan slack.Channel {
 		for {
 			chans, cursor, err := client.GetConversations(params)
 			if err != nil {
-				log.Fatalf("Error getting conversations: %s", err)
+				log.Fatalf("Error getting channels: %s", err)
 			}
 			for _, c := range chans {
 				channels <- c
@@ -203,9 +203,9 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 			time.Sleep(retryAfter)
 			continue
 		} else if err != nil {
-			log.Fatalf("%s - Error getting conversation history: %s", channelName, err)
+			log.Fatalf("%s - Error getting channel history: %s", channelName, err)
 		} else if resp == nil {
-			log.Printf("%s - nil response when getting conversation history", channelName)
+			log.Printf("%s - nil response when getting channel history", channelName)
 			break
 		}
 
@@ -475,7 +475,7 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 			if !exists {
 				c, err := botClient.GetConversationInfo(ev.Channel, false)
 				if err != nil {
-					log.Printf("Error getting conversation info: %s", err)
+					log.Printf("Error getting channel info: %s", err)
 					continue
 				}
 				channels[c.ID] = *c
