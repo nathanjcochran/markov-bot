@@ -403,6 +403,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 
 func startWords(text string, stopwords map[string]bool) []string {
 	// Split input message (sent from user to trigger bot response) into tokens
+	// for sake of finding work to start markov chain response
 	input := strings.FieldsFunc(text, func(r rune) bool {
 		if unicode.IsSpace(r) {
 			return true
@@ -418,6 +419,9 @@ func startWords(text string, stopwords map[string]bool) []string {
 	// Filter out stopwords
 	var words []string
 	for _, word := range input {
+		if word == "" {
+			continue
+		}
 		if stopwords[word] {
 			continue
 		}
