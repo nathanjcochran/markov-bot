@@ -33,6 +33,7 @@ var (
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
 	sentenceLen      = flag.Int("sentence-length", 10, "Target sentence length")
 	sentenceAttempts = flag.Int("sentence-attempts", 5, "Number of times to try building a sentence longer than minimum")
+	minInputWords    = flag.Int("input-words", 3, "Number of input words required to definitely choose one as the starting prefix")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
 	cache            = flag.String("cache", "./cache", "Cache directory")
 	buffer           = flag.Int("buffer", 1000, "Buffer size")
@@ -380,7 +381,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	)
 	// Only use input word 50% of time if the user didn't give many words
 	// (otherwise, it would be too predictable)
-	if len(words) > 3 || rand.Int31n(2) > 0 {
+	if len(words) > *minInputWords || rand.Int31n(2) > 0 {
 		// For each valid input word, check if it's a known prefix
 		for _, word := range words {
 			// If the word is a known prefix with at least the minimum number
