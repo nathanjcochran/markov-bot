@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/nlopes/slack"
+	"github.com/peterbourgon/ff"
 )
 
 const (
@@ -43,7 +44,9 @@ var (
 var cacheDir string
 
 func main() {
-	flag.Parse()
+	if err := ff.Parse(flag.CommandLine, os.Args[1:], ff.WithEnvVarNoPrefix()); err != nil {
+		log.Fatalf("Error parsing flags: %s", err)
+	}
 	rand.Seed(time.Now().UnixNano())
 
 	userClient := slack.New(*userToken)
