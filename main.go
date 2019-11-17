@@ -387,10 +387,10 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Prefix, []string) {
 	// Get a list of valid words from the input message
 	words := startWords(input, stopwords)
-	log.Printf("startWords: %v", words)
+	log.Printf("Potential starting words: %v", words)
 
 	// If last word ends with a question mark, try to use that
-	if strings.HasSuffix(input, "?") {
+	if strings.HasSuffix(input, "?") && len(words) > 0 {
 		word := words[len(words)-1]
 		if len(c[word]) > *optionMin {
 			log.Printf("Using question word as prefix: %s", word)
