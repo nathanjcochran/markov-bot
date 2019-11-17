@@ -29,8 +29,10 @@ Usage of markov-bot:
     	Minimum prefix length, even if below option-min (default 2)
   -sentence-attempts int
     	Number of times to try building a sentence longer than minimum (default 5)
-  -sentence-length int
-    	Target sentence length (default 10)
+  -sentence-max int
+    	Target maximum sentence length (default 20)
+  -sentence-min int
+    	Target minimum sentence length (default 5)
   -stopwords string
     	Stopwords file (default "./stopwords.txt")
   -user-token string
