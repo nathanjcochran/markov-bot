@@ -17,16 +17,22 @@ Usage of markov-bot:
     	Concurrency (default 3)
   -email string
     	Email address of slack user to create bot for
+  -input-words int
+    	Number of input words required to definitely choose one as the starting prefix (default 3)
+  -logs string
+    	Log directory (default "./logs")
   -option-min int
-    	Minimum number of options before downgrading to shorter prefix (default 5)
-  -prefix-length int
-    	Prefix length (default 4)
+    	Minimum number of options before downgrading to shorter prefix (default 2)
+  -prefix-max int
+    	Maximum prefix length (default 5)
   -prefix-min int
     	Minimum prefix length, even if below option-min (default 2)
   -sentence-attempts int
     	Number of times to try building a sentence longer than minimum (default 5)
   -sentence-length int
-    	Minimum sentence length, unless there are no other options (default 5)
+    	Target sentence length (default 10)
+  -stopwords string
+    	Stopwords file (default "./stopwords.txt")
   -user-token string
     	Slack user token
 ```
