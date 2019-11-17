@@ -32,7 +32,8 @@ var (
 	optionMin        = flag.Int("option-min", 2, "Minimum number of options before downgrading to shorter prefix")
 	prefixMax        = flag.Int("prefix-max", 5, "Maximum prefix length")
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
-	sentenceLen      = flag.Int("sentence-length", 10, "Target sentence length")
+	sentenceMin      = flag.Int("sentence-min", 5, "Target minimum sentence length")
+	sentenceMax      = flag.Int("sentence-max", 20, "Target maximum sentence length")
 	sentenceAttempts = flag.Int("sentence-attempts", 5, "Number of times to try building a sentence longer than minimum")
 	minInputWords    = flag.Int("input-words", 3, "Number of input words required to definitely choose one as the starting prefix")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
@@ -352,7 +353,7 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 		// case, we try again)
 		word := opts[rand.Intn(len(opts))]
 		if word == endToken {
-			if len(out) < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
+			if len(out) < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
 				attempts++
 				log.Printf("Below minimum sentence length - trying again")
 				continue
@@ -362,7 +363,7 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 			strings.HasSuffix(word, "!") ||
 			strings.HasSuffix(word, "?")) &&
 			strings.Count(word, ".") <= 1 { // Abbreviations shouldn't end sentences
-			if len(out)+1 < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
+			if len(out)+1 < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
 				attempts++
 				log.Printf("Below minimum sentence length - trying again")
 				continue
@@ -457,7 +458,7 @@ func useShorterPrefix(prefix Prefix, opts []string, out []string) bool {
 	// shortening the prefix, which leads to more nonsensical sentences)
 	if len(opts) < *optionMin &&
 		len(prefix) > *prefixMin &&
-		len(out) < *sentenceLen {
+		len(out) < *sentenceMax {
 		return true
 	}
 	return false
