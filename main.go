@@ -58,7 +58,8 @@ func main() {
 	}
 
 	log.Println("Authenticating with bot token")
-	if _, err := botClient.AuthTest(); err != nil {
+	botInfo, err := botClient.AuthTest()
+	if err != nil {
 		log.Fatalf("Error authenticating with bot token: %s", err)
 	}
 
@@ -79,7 +80,7 @@ func main() {
 	channels := fetchChannels(userClient)
 	msgs := fetchChannelHistories(userClient, user, channels)
 	chain := buildMarkovChain(msgs)
-	startBot(botClient, chain, stopwords)
+	startBot(botClient, botInfo.UserID, chain, stopwords)
 
 	log.Printf("Goodbye!")
 }
@@ -451,11 +452,12 @@ func useShorterPrefix(prefix Prefix, opts []string, out []string) bool {
 	return false
 }
 
-func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]bool) {
+func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopwords map[string]bool) {
 	log.Printf("Starting bot")
 	rtm := botClient.NewRTM()
 	go rtm.ManageConnection()
 
+	channels := map[string]slack.Channel{}
 	for msg := range rtm.IncomingEvents {
 		switch ev := msg.Data.(type) {
 		case *slack.ConnectedEvent:
@@ -467,6 +469,25 @@ func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]b
 			}
 
 			log.Printf("Message received: %v\n", ev.Text)
+
+			// Fetch channel the message was from (cache for future reference)
+			channel, exists := channels[ev.Channel]
+			if !exists {
+				c, err := botClient.GetConversationInfo(ev.Channel, false)
+				if err != nil {
+					log.Printf("Error getting conversation info: %s", err)
+					continue
+				}
+				channels[c.ID] = *c
+				channel = *c
+			}
+
+			// Only respond to DMs, or if the bot was mentioned
+			if !(channel.IsIM || strings.Contains(ev.Text, botID)) {
+				log.Printf("Skipping - not a DM, and doesn't mention bot")
+				continue
+			}
+
 			rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
 			response := chain.Generate(ev.Text, stopwords)
 			time.Sleep(time.Second / 3) // Mimicks typing
