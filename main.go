@@ -331,7 +331,7 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 		// Check if we should use a shorter prefix (because this prefix isn't
 		// generating enough options in the markov chain, and therefore
 		// wouldn't generate a very novel sentence)
-		log.Printf("Prefix: '%s'; Length: %d; Opts: %d", key, len(prefix), len(opts))
+		log.Printf("Prefix: '%s'; Prefix Length: %d; Opts: %d", key, len(prefix), len(opts))
 		if useShorterPrefix(prefix, opts, out) {
 			log.Printf("Too few options: %d; Prefix length: %d", len(opts), len(prefix))
 			prefix = prefix[1:] // Use a shorter prefix
