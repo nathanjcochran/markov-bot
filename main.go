@@ -385,12 +385,23 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 }
 
 func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Prefix, []string) {
-	// Choose a starting prefix from the chat message used to trigger the bot
-	var (
-		words  = startWords(input, stopwords)
-		prefix = Prefix{startToken}
-		out    []string
-	)
+	// Get a list of valid words from the input message
+	words := startWords(input, stopwords)
+	log.Printf("startWords: %v", words)
+
+	// If last word ends with a question mark, try to use that
+	if strings.HasSuffix(input, "?") {
+		word := words[len(words)-1]
+		if len(c[word]) > *optionMin {
+			log.Printf("Using question word as prefix: %s", word)
+			return Prefix{startToken, word}, []string{word}
+		}
+	}
+
+	// Randomize order of words
+	rand.Shuffle(len(words), func(i, j int) {
+		words[i], words[j] = words[j], words[i]
+	})
 	// Only use input word 50% of time if the user didn't give many words
 	// (otherwise, it would be too predictable)
 	if len(words) > *minInputWords || rand.Int31n(2) > 0 {
@@ -399,14 +410,15 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 			// If the word is a known prefix with at least the minimum number
 			// of options in the markov chain, use it
 			if len(c[word]) > *optionMin {
-				log.Printf("Using input word as prefix: %s", word)
-				prefix = Prefix{startToken, word}
-				out = append(out, word)
-				break
+				log.Printf("Using random input word as prefix: %s", word)
+				return Prefix{startToken, word}, []string{word}
 			}
 		}
 	}
-	return prefix, out
+
+	// Just use the starting token, and let it randomly choose the first word
+	log.Printf("Using random starting word as prefix")
+	return Prefix{startToken}, nil
 }
 
 func startWords(text string, stopwords map[string]bool) []string {
@@ -424,22 +436,17 @@ func startWords(text string, stopwords map[string]bool) []string {
 		}
 	})
 
-	// Filter out stopwords
+	// Filter out empty strings and stopwords
 	var words []string
 	for _, word := range input {
 		if word == "" {
 			continue
 		}
-		if stopwords[word] {
+		if stopwords[strings.ToLower(word)] {
 			continue
 		}
 		words = append(words, word)
 	}
-
-	// Randomize order of words
-	rand.Shuffle(len(words), func(i, j int) {
-		words[i], words[j] = words[j], words[i]
-	})
 	return words
 }
 
