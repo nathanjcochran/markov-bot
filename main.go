@@ -167,7 +167,10 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 			time.Sleep(retryAfter)
 			continue
 		} else if err != nil {
-			log.Fatalf("Error getting conversation history: %s", err)
+			log.Fatalf("%s - Error getting conversation history: %s", channelName, err)
+		} else if resp == nil {
+			log.Printf("%s - nil response when getting conversation history", channelName)
+			break
 		}
 
 		// Filter messages by user
