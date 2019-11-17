@@ -28,3 +28,6 @@ _testmain.go
 
 # Cache directory
 cache
+
+# Log directory
+logs

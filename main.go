@@ -37,6 +37,7 @@ var (
 	minInputWords    = flag.Int("input-words", 3, "Number of input words required to definitely choose one as the starting prefix")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
 	cache            = flag.String("cache", "./cache", "Cache directory")
+	logDir           = flag.String("logs", "./logs", "Log directory")
 	buffer           = flag.Int("buffer", 1000, "Buffer size")
 	concurrency      = flag.Int("concurrency", 3, "Concurrency")
 )
@@ -73,6 +74,12 @@ func main() {
 		cacheDir = path.Join(*cache, user.Profile.Email)
 		if err := os.MkdirAll(*cache, 0755); err != nil {
 			log.Fatal("Error creating cache directory: %s", err)
+		}
+	}
+
+	if *logDir != "" {
+		if err := os.MkdirAll(*logDir, 0755); err != nil {
+			log.Fatal("Error creating logs directory: %s", err)
 		}
 	}
 
@@ -492,6 +499,13 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 				continue
 			}
 
+			// Fetch user the message was from (cache for future reference)
+			user, err := botClient.GetUserInfo(ev.User)
+			if err != nil {
+				log.Printf("Error getting user info for user: %s: %s", ev.User, err)
+				continue
+			}
+
 			rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
 			response := chain.Generate(ev.Text, stopwords)
 			time.Sleep(time.Second / 3) // Mimicks typing
@@ -500,6 +514,11 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 				ev.Channel,
 			))
 			log.Printf("Message sent: %v\n", response)
+
+			// Log message
+			if *logDir != "" {
+				logMessages(channel, *user, ev.Text, response)
+			}
 		case *slack.LatencyReport:
 			log.Printf("Current latency: %v\n", ev.Value)
 		case *slack.RTMError:
@@ -510,5 +529,32 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 		default:
 			continue
 		}
+	}
+}
+
+func logMessages(channel slack.Channel, user slack.User, msg, response string) {
+	filename := channel.Name
+	if channel.IsIM {
+		filename = user.Name
+	}
+	if filename == "" {
+		filename = channel.ID
+	}
+	filename = path.Join(*logDir, filename)
+
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("Error opening log file for writing: %s", err)
+		return
+	}
+	defer f.Close()
+	msg = fmt.Sprintf("[%s] %s\n", user.Name, msg)
+	if _, err := f.WriteString(msg); err != nil {
+		log.Println("Error appending message to log file: %s", err)
+	}
+
+	response = fmt.Sprintf("[bot] %s\n", response)
+	if _, err := f.WriteString(response); err != nil {
+		log.Println("Error appending response to log file: %s", err)
 	}
 }
