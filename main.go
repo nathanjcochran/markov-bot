@@ -27,10 +27,10 @@ var (
 	userToken        = flag.String("user-token", "", "Slack user token")
 	botToken         = flag.String("bot-token", "", "Slack bot token")
 	email            = flag.String("email", "", "Email address of slack user to create bot for")
-	prefixLen        = flag.Int("prefix-length", 4, "Prefix length")
-	optionMin        = flag.Int("option-min", 5, "Minimum number of options before downgrading to shorter prefix")
+	optionMin        = flag.Int("option-min", 2, "Minimum number of options before downgrading to shorter prefix")
+	prefixMax        = flag.Int("prefix-max", 5, "Maximum prefix length")
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
-	sentenceLen      = flag.Int("sentence-length", 5, "Minimum sentence length, unless there are no other options")
+	sentenceLen      = flag.Int("sentence-length", 8, "Minimum sentence length, unless there are no other options")
 	sentenceAttempts = flag.Int("sentence-attempts", 5, "Number of times to try building a sentence longer than minimum")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
 	cache            = flag.String("cache", "./cache", "Cache directory")
@@ -234,7 +234,7 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 				return true
 			}
 			switch r {
-			case ';', '`', '[', ']', '{', '}', '(', ')', '|', ',', '"':
+			case ';', '[', ']', '{', '}', '(', ')', '|', ',', '"':
 				return true
 			default:
 				return false
@@ -242,15 +242,15 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 		})
 
 		prefixes := [][]string{}
-		for i := 0; i < *prefixLen; i++ {
+		for i := 0; i < *prefixMax; i++ {
 			prefixes = append(prefixes, []string{startToken})
 		}
 
 		for _, token := range tokens {
-			if token == "" {
+			if !strings.ContainsAny(strings.ToLower(token), "abcdefghijklmnopqrstuvwxyz1234567890") {
 				continue
 			}
-			for i := 0; i < *prefixLen; i++ {
+			for i := 0; i < *prefixMax; i++ {
 				prefix := prefixes[i]
 				if len(prefix) > i {
 					key := strings.ToLower(strings.Join(prefix, " "))
@@ -264,7 +264,7 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 				prefixes[i] = prefix
 			}
 		}
-		for i := 0; i < *prefixLen; i++ {
+		for i := 0; i < *prefixMax; i++ {
 			prefix := prefixes[i]
 			if len(prefix) > i {
 				key := strings.ToLower(strings.Join(prefix, " "))
@@ -294,24 +294,25 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 		prefix = []string{startToken}
 		out    []string
 	)
-	for _, word := range words {
-		if c[word] != nil {
-			log.Printf("Using input word as prefix: %s", word)
-			prefix = []string{startToken, word}
-			out = append(out, word)
-			break
+	// Only use input word 50% of time if user gave few words
+	if len(words) > 3 || rand.Int31n(2) > 0 {
+		for _, word := range words {
+			if len(c[word]) > *optionMin {
+				log.Printf("Using input word as prefix: %s", word)
+				prefix = []string{startToken, word}
+				out = append(out, word)
+				break
+			}
 		}
 	}
 
-	var (
-		attempts int
-	)
+	var attempts int
 	for {
 		key := strings.ToLower(strings.Join(prefix, " "))
 		opts := c[key]
 
-		log.Printf("Key: '%s' Prefix: %d Opts: %d", key, len(prefix), len(opts))
-		if len(opts) == 0 || (len(opts) < *optionMin && len(prefix) > *prefixMin) {
+		log.Printf("Key: '%s'; Prefix: %d; Opts: %d", key, len(prefix), len(opts))
+		if len(opts) == 0 || (len(opts) < *optionMin && len(prefix) > *prefixMin && len(out) < *sentenceLen) {
 			log.Printf("Too few options: %d; Prefix length: %d", len(opts), len(prefix))
 			prefix = prefix[1:] // Use a shorter prefix
 			continue
@@ -319,18 +320,25 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 
 		word := opts[rand.Intn(len(opts))]
 		if word == endToken {
-			if len(out) == 0 {
-				log.Printf("No tokens - trying again")
-				continue
-			} else if len(out) < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
+			if len(out) < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
 				attempts++
 				log.Printf("Below minimum sentence length - trying again")
 				continue
 			}
 			return strings.Join(out, " ")
+		} else if strings.HasSuffix(word, ".") ||
+			strings.HasSuffix(word, "!") ||
+			strings.HasSuffix(word, "?") {
+			if len(out)+1 < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
+				attempts++
+				log.Printf("Below minimum sentence length - trying again")
+				continue
+			}
+			out = append(out, word)
+			return strings.Join(out, " ")
 		}
 		prefix = append(prefix, word)
-		if len(prefix) > *prefixLen {
+		if len(prefix) > *prefixMax {
 			prefix = prefix[1:]
 		}
 		out = append(out, word)
@@ -358,8 +366,20 @@ func readStopwords() map[string]bool {
 }
 
 func shuffledWords(text string, stopwords map[string]bool) []string {
+	input := strings.FieldsFunc(text, func(r rune) bool {
+		if unicode.IsSpace(r) {
+			return true
+		}
+		switch r {
+		case ';', '[', ']', '{', '}', '(', ')', '|', ',', '"', '\'', '.', '?', '!':
+			return true
+		default:
+			return false
+		}
+	})
+
 	var words []string
-	for _, word := range strings.Fields(text) {
+	for _, word := range input {
 		if stopwords[word] {
 			continue
 		}
@@ -389,7 +409,7 @@ func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]b
 			log.Printf("Message received: %v\n", ev.Text)
 			rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
 			response := chain.Generate(ev.Text, stopwords)
-			time.Sleep(time.Second / 2)
+			time.Sleep(time.Second / 4)
 			log.Printf("Response: %v\n", response)
 			rtm.SendMessage(rtm.NewOutgoingMessage(
 				response,
