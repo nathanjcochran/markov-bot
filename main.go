@@ -87,7 +87,7 @@ func main() {
 	channels := fetchChannels(userClient)
 	msgs := fetchChannelHistories(userClient, user, channels)
 	chain := buildMarkovChain(msgs)
-	startBot(botClient, botInfo.UserID, chain, stopwords)
+	startBot(botClient, *botInfo, chain, stopwords)
 
 	log.Printf("Goodbye!")
 }
@@ -463,7 +463,7 @@ func useShorterPrefix(prefix Prefix, opts []string, out []string) bool {
 	return false
 }
 
-func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopwords map[string]bool) {
+func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain MarkovChain, stopwords map[string]bool) {
 	log.Printf("Starting bot")
 	rtm := botClient.NewRTM()
 	go rtm.ManageConnection()
@@ -494,7 +494,7 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 			}
 
 			// Only respond to DMs, or if the bot was mentioned
-			if !(channel.IsIM || strings.Contains(ev.Text, botID)) {
+			if !(channel.IsIM || strings.Contains(ev.Text, botInfo.UserID)) {
 				log.Printf("Skipping - not a DM, and doesn't mention bot")
 				continue
 			}
@@ -517,7 +517,7 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 
 			// Log message
 			if *logDir != "" {
-				logMessages(channel, *user, ev.Text, response)
+				logMessages(channel, user.Name, botInfo.User, ev.Text, response)
 			}
 		case *slack.LatencyReport:
 			log.Printf("Current latency: %v\n", ev.Value)
@@ -532,10 +532,10 @@ func startBot(botClient *slack.Client, botID string, chain MarkovChain, stopword
 	}
 }
 
-func logMessages(channel slack.Channel, user slack.User, msg, response string) {
+func logMessages(channel slack.Channel, userName, botName, msg, response string) {
 	filename := channel.Name
 	if channel.IsIM {
-		filename = user.Name
+		filename = userName
 	}
 	if filename == "" {
 		filename = channel.ID
@@ -548,12 +548,12 @@ func logMessages(channel slack.Channel, user slack.User, msg, response string) {
 		return
 	}
 	defer f.Close()
-	msg = fmt.Sprintf("[%s] %s\n", user.Name, msg)
+	msg = fmt.Sprintf("[%s] %s\n", userName, msg)
 	if _, err := f.WriteString(msg); err != nil {
 		log.Println("Error appending message to log file: %s", err)
 	}
 
-	response = fmt.Sprintf("[bot] %s\n", response)
+	response = fmt.Sprintf("[%s] %s\n", botName, response)
 	if _, err := f.WriteString(response); err != nil {
 		log.Println("Error appending response to log file: %s", err)
 	}
