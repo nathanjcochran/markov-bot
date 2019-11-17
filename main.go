@@ -30,7 +30,7 @@ var (
 	optionMin        = flag.Int("option-min", 2, "Minimum number of options before downgrading to shorter prefix")
 	prefixMax        = flag.Int("prefix-max", 5, "Maximum prefix length")
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
-	sentenceLen      = flag.Int("sentence-length", 8, "Target sentence length")
+	sentenceLen      = flag.Int("sentence-length", 10, "Target sentence length")
 	sentenceAttempts = flag.Int("sentence-attempts", 5, "Number of times to try building a sentence longer than minimum")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
 	cache            = flag.String("cache", "./cache", "Cache directory")
