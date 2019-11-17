@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	limit      = 1000
-	startToken = "^"
-	endToken   = "$"
-	chainFile  = "markov_chain"
+	limit             = 1000
+	startToken        = "^"
+	endToken          = "$"
+	alphanumericChars = "abcdefghijklmnopqrstuvwxyz1234567890"
 )
 
 var (
@@ -78,6 +78,26 @@ func main() {
 	startBot(botClient, chain, stopwords)
 
 	log.Printf("Goodbye!")
+}
+
+func readStopwords() map[string]bool {
+	log.Println("Reading stopwords file: %s", *stopwordsFile)
+	file, err := os.Open(*stopwordsFile)
+	if err != nil {
+		log.Fatalf("Error opening stopwords file: %s", err)
+	}
+	defer file.Close()
+
+	stopwords := map[string]bool{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		stopwords[scanner.Text()] = true
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error scanning cache file: %s", err)
+	}
+
+	return stopwords
 }
 
 func fetchChannels(client *slack.Client) <-chan slack.Channel {
@@ -212,38 +232,44 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 
 type MarkovChain map[string][]string
 
+type Prefix []string
+
+func (p Prefix) String() string {
+	return strings.ToLower(strings.Join(p, " "))
+}
+
 func buildMarkovChain(msgs <-chan string) MarkovChain {
 	chain := MarkovChain{}
 
 	for msg := range msgs {
-		tokens := strings.FieldsFunc(msg, func(r rune) bool {
-			if unicode.IsSpace(r) {
-				return true
-			}
-			switch r {
-			case ';', '[', ']', '{', '}', '(', ')', '|', ',', '"':
-				return true
-			default:
-				return false
-			}
-		})
-
-		prefixes := [][]string{}
+		// All prefixes start with the start token
+		prefixes := []Prefix{}
 		for i := 0; i < *prefixMax; i++ {
-			prefixes = append(prefixes, []string{startToken})
+			prefixes = append(prefixes, Prefix{startToken})
 		}
 
+		// Split the message into tokens, index each token by its prefix
+		tokens := splitMessage(msg)
 		for _, token := range tokens {
-			if !strings.ContainsAny(strings.ToLower(token), "abcdefghijklmnopqrstuvwxyz1234567890") {
+			// Skip tokens with no alphanumeric characters (probably code fragments)
+			if !strings.ContainsAny(strings.ToLower(token), alphanumericChars) {
 				continue
 			}
+
+			// Index token by all prefixes, up to prefixMax
 			for i := 0; i < *prefixMax; i++ {
 				prefix := prefixes[i]
+
+				// Index the token if the prefix has reached its predefined
+				// length (otherwise, we'd be duplicating shorter prefixes)
 				if len(prefix) > i {
-					key := strings.ToLower(strings.Join(prefix, " "))
+					key := prefix.String()
 					chain[key] = append(chain[key], token)
 				}
 
+				// Update the prefix to include the new token. If the prefix
+				// has surpassed its predefined length, remove the first token
+				// (shift the sliding window)
 				prefix = append(prefix, token)
 				if len(prefix) > i+1 {
 					prefix = prefix[1:]
@@ -251,10 +277,12 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 				prefixes[i] = prefix
 			}
 		}
+
+		// Index the endToken by all prefixes
 		for i := 0; i < *prefixMax; i++ {
 			prefix := prefixes[i]
 			if len(prefix) > i {
-				key := strings.ToLower(strings.Join(prefix, " "))
+				key := prefix.String()
 				chain[key] = append(chain[key], endToken)
 			}
 		}
@@ -264,37 +292,52 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 	return chain
 }
 
-func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
-	// Choose starting prefix
-	var (
-		words  = shuffledWords(input, stopwords)
-		prefix = []string{startToken}
-		out    []string
-	)
-	// Only use input word 50% of time if user gave few words
-	if len(words) > 3 || rand.Int31n(2) > 0 {
-		for _, word := range words {
-			if len(c[word]) > *optionMin {
-				log.Printf("Using input word as prefix: %s", word)
-				prefix = []string{startToken, word}
-				out = append(out, word)
-				break
-			}
+// Splits a message into tokens, for sake of building markov chain
+func splitMessage(msg string) []string {
+	return strings.FieldsFunc(msg, func(r rune) bool {
+		// Split on whitespace
+		if unicode.IsSpace(r) {
+			return true
 		}
-	}
 
-	var attempts int
+		// Split on characters that don't tend to work well in markov chains,
+		// but leave end-punctuation ('.', '!', '?'), which is used to
+		// terminate generated sentences along with the endToken
+		switch r {
+		case ';', '[', ']', '{', '}', '(', ')', '|', ',', '"':
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
+	var (
+		// Choose starting prefix from input, start generating sentence
+		prefix, out = c.startingPrefix(input, stopwords)
+		attempts    int
+	)
 	for {
-		key := strings.ToLower(strings.Join(prefix, " "))
+		// Get all of the word options for this prefix
+		key := prefix.String()
 		opts := c[key]
 
+		// Check if we should use a shorter prefix (because this prefix isn't
+		// generating enough options in the markov chain, and therefore
+		// wouldn't generate a very novel sentence)
 		log.Printf("Key: '%s'; Prefix: %d; Opts: %d", key, len(prefix), len(opts))
-		if len(opts) == 0 || (len(opts) < *optionMin && len(prefix) > *prefixMin && len(out) < *sentenceLen) {
+		if useShorterPrefix(prefix, opts, out) {
 			log.Printf("Too few options: %d; Prefix length: %d", len(opts), len(prefix))
 			prefix = prefix[1:] // Use a shorter prefix
 			continue
 		}
 
+		// Randomly choose a word from the available options. If it's the
+		// endToken, or a word that ends with punctuation, end the sentence
+		// (unless we haven't reached the target sentence length yet, and there
+		// are other potential options that don't end the sentence, in which
+		// case, we try again)
 		word := opts[rand.Intn(len(opts))]
 		if word == endToken {
 			if len(out) < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
@@ -315,35 +358,46 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 			out = append(out, word)
 			return strings.Join(out, " ")
 		}
+
+		// Append chosen word to sentence
+		out = append(out, word)
+
+		// Add the chosen word to the prefix, and shift the
+		// sliding window if we've passed max prefix length
 		prefix = append(prefix, word)
 		if len(prefix) > *prefixMax {
 			prefix = prefix[1:]
 		}
-		out = append(out, word)
 	}
 }
 
-func readStopwords() map[string]bool {
-	log.Println("Reading stopwords file: %s", *stopwordsFile)
-	file, err := os.Open(*stopwordsFile)
-	if err != nil {
-		log.Fatalf("Error opening stopwords file: %s", err)
+func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Prefix, []string) {
+	// Choose a starting prefix from the chat message used to trigger the bot
+	var (
+		words  = startWords(input, stopwords)
+		prefix = Prefix{startToken}
+		out    []string
+	)
+	// Only use input word 50% of time if the user didn't give many words
+	// (otherwise, it would be too predictable)
+	if len(words) > 3 || rand.Int31n(2) > 0 {
+		// For each valid input word, check if it's a known prefix
+		for _, word := range words {
+			// If the word is a known prefix with at least the minimum number
+			// of options in the markov chain, use it
+			if len(c[word]) > *optionMin {
+				log.Printf("Using input word as prefix: %s", word)
+				prefix = Prefix{startToken, word}
+				out = append(out, word)
+				break
+			}
+		}
 	}
-	defer file.Close()
-
-	stopwords := map[string]bool{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		stopwords[scanner.Text()] = true
-	}
-	if err := scanner.Err(); err != nil {
-		log.Fatalf("Error scanning cache file: %s", err)
-	}
-
-	return stopwords
+	return prefix, out
 }
 
-func shuffledWords(text string, stopwords map[string]bool) []string {
+func startWords(text string, stopwords map[string]bool) []string {
+	// Split input message (sent from user to trigger bot response) into tokens
 	input := strings.FieldsFunc(text, func(r rune) bool {
 		if unicode.IsSpace(r) {
 			return true
@@ -356,6 +410,7 @@ func shuffledWords(text string, stopwords map[string]bool) []string {
 		}
 	})
 
+	// Filter out stopwords
 	var words []string
 	for _, word := range input {
 		if stopwords[word] {
@@ -363,10 +418,33 @@ func shuffledWords(text string, stopwords map[string]bool) []string {
 		}
 		words = append(words, word)
 	}
+
+	// Randomize order of words
 	rand.Shuffle(len(words), func(i, j int) {
 		words[i], words[j] = words[j], words[i]
 	})
 	return words
+}
+
+func useShorterPrefix(prefix Prefix, opts []string, out []string) bool {
+	// If we have no options, use a shorter prefix (this can happen if we
+	// choose a starting prefix with an input word that never actually starts a
+	// sentence)
+	if len(opts) == 0 {
+		return true
+	}
+
+	// If we have less than optionMin options, and our prefix is greater than
+	// prefixMin, and our sentence hasn't reached the target length yet, use a
+	// shorter prefix (if the sentence has reached the target length, we just
+	// let it finish in a coherent way, rather than increasing randomness by
+	// shortening the prefix, which leads to more nonsensical sentences)
+	if len(opts) < *optionMin &&
+		len(prefix) > *prefixMin &&
+		len(out) < *sentenceLen {
+		return true
+	}
+	return false
 }
 
 func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]bool) {
@@ -387,22 +465,12 @@ func startBot(botClient *slack.Client, chain MarkovChain, stopwords map[string]b
 			log.Printf("Message received: %v\n", ev.Text)
 			rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
 			response := chain.Generate(ev.Text, stopwords)
-			time.Sleep(time.Second / 3)
-			log.Printf("Response: %v\n", response)
+			time.Sleep(time.Second / 3) // Mimicks typing
 			rtm.SendMessage(rtm.NewOutgoingMessage(
 				response,
 				ev.Channel,
 			))
-			log.Printf("Message successfully sent to channel %ss", ev.Channel)
-		//	channelID, timestamp, err := botClient.PostMessage(
-		//		ev.Channel,
-		//		slack.MsgOptionText(response, false),
-		//	)
-		//	if err != nil {
-		//		log.Printf("Error posting message: %s\n", err)
-		//	} else {
-		//		log.Printf("Message successfully sent to channel %s at %s", channelID, timestamp)
-		//	}
+			log.Printf("Message sent: %v\n", response)
 		case *slack.LatencyReport:
 			log.Printf("Current latency: %v\n", ev.Value)
 		case *slack.RTMError:
