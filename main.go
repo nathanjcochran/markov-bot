@@ -38,15 +38,11 @@ var (
 	concurrency      = flag.Int("concurrency", 3, "Concurrency")
 )
 
+var cacheDir string
+
 func main() {
 	flag.Parse()
 	rand.Seed(time.Now().UnixNano())
-
-	if *cache != "" {
-		if err := os.MkdirAll(*cache, 0755); err != nil {
-			log.Fatal("Error creating cache directory: %s", err)
-		}
-	}
 
 	userClient := slack.New(*userToken)
 	botClient := slack.New(*botToken)
@@ -65,6 +61,13 @@ func main() {
 	user, err := userClient.GetUserByEmail(*email)
 	if err != nil {
 		log.Fatalf("Error fetching user by email: %s", err)
+	}
+
+	if *cache != "" {
+		cacheDir = fmt.Sprintf("%s/%s", *cache, user.Profile.Email)
+		if err := os.MkdirAll(*cache, 0755); err != nil {
+			log.Fatal("Error creating cache directory: %s", err)
+		}
 	}
 
 	stopwords := readStopwords()
@@ -137,8 +140,8 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 
 	log.Printf("Fetching channel history: %s", channelName)
 
-	filename := fmt.Sprintf("%s/%s.txt", *cache, channelName)
-	if *cache != "" {
+	filename := fmt.Sprintf("%s/%s.txt", cacheDir, channelName)
+	if cacheDir != "" {
 		if file, err := os.Open(filename); err != nil {
 			log.Printf("Error opening cache file: %s", err)
 		} else {
@@ -196,7 +199,7 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 		page++
 	}
 
-	if *cache != "" {
+	if cacheDir != "" {
 		log.Printf("Saving to cache: %s", filename)
 		out := strings.Join(messages, "\n")
 		if err := ioutil.WriteFile(filename, []byte(out), 0755); err != nil {
@@ -210,23 +213,6 @@ type MarkovChain map[string][]string
 
 func buildMarkovChain(msgs <-chan string) MarkovChain {
 	chain := MarkovChain{}
-	//filename := fmt.Sprintf("%s/%s.json", *cache, chainFile)
-	//if *cache != "" {
-	//	if body, err := ioutil.ReadFile(filename); err == nil {
-	//		log.Printf("Using cached file: %s", filename)
-	//		if err := json.Unmarshal(body, &chain); err != nil {
-	//			log.Fatalf("Error unmarshaling markov chain file: %s", err)
-	//		}
-	//		// Drain messages:
-	//		for range msgs {
-	//			continue
-	//		}
-	//		log.Printf("Markov chain built!")
-	//		return chain
-	//	} else {
-	//		log.Printf("Error reading markov chain file: %s", err)
-	//	}
-	//}
 
 	for msg := range msgs {
 		tokens := strings.FieldsFunc(msg, func(r rune) bool {
@@ -272,16 +258,6 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 			}
 		}
 	}
-
-	//if *cache != "" {
-	//	out, err := json.Marshal(chain)
-	//	if err != nil {
-	//		log.Fatalf("Error marshaling markov chain to JSON: %s", err)
-	//	}
-	//	if err := ioutil.WriteFile(filename, out, 0755); err != nil {
-	//		log.Fatal("Error writing markov chain to cache file: %s", err)
-	//	}
-	//}
 
 	log.Printf("Markov chain built!")
 	return chain
