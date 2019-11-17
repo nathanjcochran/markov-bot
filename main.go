@@ -24,7 +24,8 @@ const (
 )
 
 var (
-	token       = flag.String("token", "", "Slack user token")
+	userToken   = flag.String("user-token", "", "Slack user token")
+	botToken    = flag.String("bot-token", "", "Slack bot token")
 	email       = flag.String("email", "", "Email address of slack user to create bot for")
 	cache       = flag.String("cache", "./cache", "Cache directory")
 	buffer      = flag.Int("buffer", 1000, "Buffer size")
@@ -33,6 +34,7 @@ var (
 
 func main() {
 	flag.Parse()
+	rand.Seed(time.Now().UnixNano())
 
 	if *cache != "" {
 		if err := os.MkdirAll(*cache, 0755); err != nil {
@@ -40,31 +42,29 @@ func main() {
 		}
 	}
 
-	client := slack.New(*token)
+	userClient := slack.New(*userToken)
+	botClient := slack.New(*botToken)
 
-	log.Println("Authenticating")
-	if _, err := client.AuthTest(); err != nil {
-		log.Fatalf("Error authenticating: %s", err)
+	log.Println("Authenticating with user token")
+	if _, err := userClient.AuthTest(); err != nil {
+		log.Fatalf("Error authenticating with user token: %s", err)
 	}
 
-	log.Printf("Fetching user info for user: %s", &email)
-	user, err := client.GetUserByEmail(*email)
+	log.Println("Authenticating with bot token")
+	if _, err := botClient.AuthTest(); err != nil {
+		log.Fatalf("Error authenticating with bot token: %s", err)
+	}
+
+	log.Printf("Fetching user info for user: %s", *email)
+	user, err := userClient.GetUserByEmail(*email)
 	if err != nil {
 		log.Fatalf("Error fetching user by email: %s", err)
 	}
 
-	channels := fetchChannels(client)
-	msgs := fetchChannelHistories(client, user, channels)
+	channels := fetchChannels(userClient)
+	msgs := fetchChannelHistories(userClient, user, channels)
 	chain := buildMarkovChain(msgs)
-
-	log.Printf("Markov chain built!")
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		fmt.Println(chain.Generate())
-	}
-	if scanner.Err() != nil {
-		log.Fatalf("Error scanning from stdin: %s", err)
-	}
+	startBot(botClient, chain)
 
 	log.Printf("Goodbye!")
 }
@@ -203,13 +203,17 @@ type MarkovChain map[string][]string
 
 func buildMarkovChain(msgs <-chan string) MarkovChain {
 	chain := MarkovChain{}
-	file := fmt.Sprintf("%s/%s.json", *cache, chainFile)
+	filename := fmt.Sprintf("%s/%s.json", *cache, chainFile)
 	if *cache != "" {
-		if body, err := ioutil.ReadFile(file); err == nil {
-			log.Printf("Using cached file: %s", file)
+		if body, err := ioutil.ReadFile(filename); err == nil {
+			log.Printf("Using cached file: %s", filename)
 			if err := json.Unmarshal(body, &chain); err != nil {
 				log.Fatalf("Error unmarshaling markov chain file: %s", err)
 			}
+			go func() {
+				for range msgs {
+				}
+			}()
 			return chain
 		} else {
 			log.Printf("Error reading markov chain file: %s", err)
@@ -217,14 +221,14 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 	}
 
 	for msg := range msgs {
-		tokens := strings.Fields(strings.ToLower(msg))
+		tokens := strings.Fields(msg)
 
 		prev := startToken
 		for _, token := range tokens {
-			chain[prev] = append(chain[prev], token)
+			chain[strings.ToLower(prev)] = append(chain[prev], token)
 			prev = token
 		}
-		chain[prev] = append(chain[prev], endToken)
+		chain[strings.ToLower(prev)] = append(chain[prev], endToken)
 	}
 
 	if *cache != "" {
@@ -232,11 +236,12 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 		if err != nil {
 			log.Fatalf("Error marshaling markov chain to JSON: %s", err)
 		}
-		if err := ioutil.WriteFile(chainFile, out, 0755); err != nil {
+		if err := ioutil.WriteFile(filename, out, 0755); err != nil {
 			log.Fatal("Error writing markov chain to cache file: %s", err)
 		}
 	}
 
+	log.Printf("Markov chain built!")
 	return chain
 }
 
@@ -248,9 +253,52 @@ func (c MarkovChain) Generate() string {
 		opts := c[prev]
 		choice := opts[rand.Intn(len(opts))]
 		if choice == endToken {
+			if len(out) == 0 {
+				continue
+			}
 			return strings.Join(out, " ")
 		}
-		prev = choice
+		prev = strings.ToLower(choice)
 		out = append(out, choice)
+	}
+}
+
+func startBot(botClient *slack.Client, chain MarkovChain) {
+	log.Printf("Starting bot")
+	rtm := botClient.NewRTM()
+	go rtm.ManageConnection()
+
+	for msg := range rtm.IncomingEvents {
+		switch ev := msg.Data.(type) {
+		case *slack.ConnectedEvent:
+			log.Printf("Connected")
+		case *slack.MessageEvent:
+			// Don't respond to bot messages (including our own)
+			if ev.BotID != "" {
+				continue
+			}
+
+			response := chain.Generate()
+			log.Printf("Message received: %v\n", ev.Text)
+			log.Printf("Response: %v\n", response)
+			channelID, timestamp, err := botClient.PostMessage(
+				ev.Channel,
+				slack.MsgOptionText(response, false),
+			)
+			if err != nil {
+				log.Printf("Error posting message: %s\n", err)
+			} else {
+				log.Printf("Message successfully sent to channel %s at %s", channelID, timestamp)
+			}
+		case *slack.LatencyReport:
+			log.Printf("Current latency: %v\n", ev.Value)
+		case *slack.RTMError:
+			log.Printf("RTM Error: %s\n", ev.Error())
+		case *slack.InvalidAuthEvent:
+			log.Printf("Invalid credentials")
+			return
+		default:
+			continue
+		}
 	}
 }
