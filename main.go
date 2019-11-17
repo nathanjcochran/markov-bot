@@ -389,8 +389,9 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	words := startWords(input, stopwords)
 	log.Printf("Potential starting words: %v", words)
 
-	// If last word ends with a question mark, try to use that
-	if strings.HasSuffix(input, "?") && len(words) > 0 {
+	// If last word ends with a question mark, try to use that 50% of the time
+	// (otherwise, it would be too predictable)
+	if strings.HasSuffix(input, "?") && len(words) > 0 && rand.Int31n(2) > 0 {
 		word := words[len(words)-1]
 		if len(c[word]) > *optionMin {
 			log.Printf("Using question word as prefix: %s", word)
