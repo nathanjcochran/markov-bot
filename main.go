@@ -326,9 +326,10 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 				continue
 			}
 			return strings.Join(out, " ")
-		} else if strings.HasSuffix(word, ".") ||
+		} else if (strings.HasSuffix(word, ".") ||
 			strings.HasSuffix(word, "!") ||
-			strings.HasSuffix(word, "?") {
+			strings.HasSuffix(word, "?")) &&
+			strings.Count(word, ".") <= 1 { // Abbreviations shouldn't end sentences
 			if len(out)+1 < *sentenceLen && len(opts) > 1 && attempts < *sentenceAttempts {
 				attempts++
 				log.Printf("Below minimum sentence length - trying again")
