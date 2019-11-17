@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +65,7 @@ func main() {
 	}
 
 	if *cache != "" {
-		cacheDir = fmt.Sprintf("%s/%s", *cache, user.Profile.Email)
+		cacheDir = path.Join(*cache, user.Profile.Email)
 		if err := os.MkdirAll(*cache, 0755); err != nil {
 			log.Fatal("Error creating cache directory: %s", err)
 		}
@@ -140,7 +141,7 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 
 	log.Printf("Fetching channel history: %s", channelName)
 
-	filename := fmt.Sprintf("%s/%s.txt", cacheDir, channelName)
+	filename := path.Join(cacheDir, fmt.Sprintf("%s.txt", channelName))
 	if cacheDir != "" {
 		if file, err := os.Open(filename); err != nil {
 			log.Printf("Error opening cache file: %s", err)
