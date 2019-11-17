@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -20,13 +19,15 @@ const (
 	limit      = 1000
 	startToken = "^"
 	endToken   = "$"
-	chainFile  = "chain"
+	chainFile  = "markov_chain"
 )
 
 var (
 	userToken   = flag.String("user-token", "", "Slack user token")
 	botToken    = flag.String("bot-token", "", "Slack bot token")
 	email       = flag.String("email", "", "Email address of slack user to create bot for")
+	prefixLen   = flag.Int("prefix-length", 3, "Prefix length")
+	sentenceLen = flag.Int("sentence-length", 5, "Target sentence length")
 	cache       = flag.String("cache", "./cache", "Cache directory")
 	buffer      = flag.Int("buffer", 1000, "Buffer size")
 	concurrency = flag.Int("concurrency", 3, "Concurrency")
@@ -203,43 +204,50 @@ type MarkovChain map[string][]string
 
 func buildMarkovChain(msgs <-chan string) MarkovChain {
 	chain := MarkovChain{}
-	filename := fmt.Sprintf("%s/%s.json", *cache, chainFile)
-	if *cache != "" {
-		if body, err := ioutil.ReadFile(filename); err == nil {
-			log.Printf("Using cached file: %s", filename)
-			if err := json.Unmarshal(body, &chain); err != nil {
-				log.Fatalf("Error unmarshaling markov chain file: %s", err)
-			}
-			go func() {
-				for range msgs {
-				}
-			}()
-			return chain
-		} else {
-			log.Printf("Error reading markov chain file: %s", err)
-		}
-	}
+	//filename := fmt.Sprintf("%s/%s.json", *cache, chainFile)
+	//if *cache != "" {
+	//	if body, err := ioutil.ReadFile(filename); err == nil {
+	//		log.Printf("Using cached file: %s", filename)
+	//		if err := json.Unmarshal(body, &chain); err != nil {
+	//			log.Fatalf("Error unmarshaling markov chain file: %s", err)
+	//		}
+	//		// Drain messages:
+	//		for range msgs {
+	//			continue
+	//		}
+	//		log.Printf("Markov chain built!")
+	//		return chain
+	//	} else {
+	//		log.Printf("Error reading markov chain file: %s", err)
+	//	}
+	//}
 
 	for msg := range msgs {
 		tokens := strings.Fields(msg)
 
-		prev := startToken
+		prefix := []string{startToken}
 		for _, token := range tokens {
-			chain[strings.ToLower(prev)] = append(chain[prev], token)
-			prev = token
+			key := strings.ToLower(strings.Join(prefix, " "))
+			chain[key] = append(chain[key], token)
+
+			prefix = append(prefix, token)
+			if len(prefix) > *prefixLen {
+				prefix = prefix[1:]
+			}
 		}
-		chain[strings.ToLower(prev)] = append(chain[prev], endToken)
+		key := strings.ToLower(strings.Join(prefix, " "))
+		chain[key] = append(chain[key], endToken)
 	}
 
-	if *cache != "" {
-		out, err := json.Marshal(chain)
-		if err != nil {
-			log.Fatalf("Error marshaling markov chain to JSON: %s", err)
-		}
-		if err := ioutil.WriteFile(filename, out, 0755); err != nil {
-			log.Fatal("Error writing markov chain to cache file: %s", err)
-		}
-	}
+	//if *cache != "" {
+	//	out, err := json.Marshal(chain)
+	//	if err != nil {
+	//		log.Fatalf("Error marshaling markov chain to JSON: %s", err)
+	//	}
+	//	if err := ioutil.WriteFile(filename, out, 0755); err != nil {
+	//		log.Fatal("Error writing markov chain to cache file: %s", err)
+	//	}
+	//}
 
 	log.Printf("Markov chain built!")
 	return chain
@@ -248,17 +256,24 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 func (c MarkovChain) Generate() string {
 	var out []string
 
-	prev := startToken
+	prefix := []string{startToken}
 	for {
-		opts := c[prev]
+		key := strings.ToLower(strings.Join(prefix, " "))
+		opts := c[key]
+		log.Printf("Options: %d", len(opts))
 		choice := opts[rand.Intn(len(opts))]
 		if choice == endToken {
 			if len(out) == 0 {
 				continue
+			} else if len(out) < *sentenceLen && len(choice) > 1 {
+				continue
 			}
 			return strings.Join(out, " ")
 		}
-		prev = strings.ToLower(choice)
+		prefix = append(prefix, choice)
+		if len(prefix) > *prefixLen {
+			prefix = prefix[1:]
+		}
 		out = append(out, choice)
 	}
 }
