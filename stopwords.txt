@@ -77,8 +77,6 @@ not
 now
 of
 off
-ok
-okay
 on
 once
 only
