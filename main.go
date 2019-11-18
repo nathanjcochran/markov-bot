@@ -242,7 +242,6 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 		out := strings.Join(messages, "\n")
 		if err := ioutil.WriteFile(filename, []byte(out), 0755); err != nil {
 			log.Fatalf("Error writing file: %s", err)
-
 		}
 	}
 }
@@ -403,13 +402,15 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 
 	// For each valid input word, check if it's a known prefix
 	for _, word := range words {
-		opts := c[word]
+		// Starting token is always valid
+		if word == startToken {
+			break
+		}
+
 		// If the word is a known prefix with at least the minimum number
 		// of options in the markov chain, use it
+		opts := c[word]
 		if len(opts) > *optionMin {
-			if word == startToken {
-				break
-			}
 			log.Printf("Using prefix: '%s'", word)
 			return Prefix{startToken, word}, []string{strings.Title(word)}
 		}
