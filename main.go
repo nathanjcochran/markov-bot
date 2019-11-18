@@ -441,19 +441,19 @@ func startWords(input string, stopwords map[string]bool) []string {
 		words = append(words, word)
 	}
 
+	shuffleFunc := func(i, j int) {
+		words[i], words[j] = words[j], words[i]
+	}
 	// If last word ends with a question mark, try to use that word as prefix.
 	if strings.HasSuffix(input, "?") {
 		// Randomize order of words, except last word (question word)
-		rand.Shuffle(len(words)-1, func(i, j int) {
-			words[i], words[j] = words[j], words[i]
-		})
+		rand.Shuffle(len(words)-1, shuffleFunc)
+
 		// Swap question word into first place
 		words[0], words[len(words)-1] = words[len(words)-1], words[0]
 	} else {
 		// Randomize order of words
-		rand.Shuffle(len(words), func(i, j int) {
-			words[i], words[j] = words[j], words[i]
-		})
+		rand.Shuffle(len(words), shuffleFunc)
 	}
 	return words
 }
