@@ -341,8 +341,8 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 		// Check if we should use a shorter prefix (because this prefix isn't
 		// generating enough options in the markov chain, and therefore
 		// wouldn't generate a very novel sentence)
-		log.Printf("Prefix length: %-2d Options: %-5d Prefix: '%s'",
-			len(prefix), len(opts), key,
+		log.Printf("Len: %-3d Prefix: %-3d Opts: %-5d '%s'",
+			len(out), len(prefix), len(opts), key,
 		)
 		if useShorterPrefix(prefix, opts, out) {
 			prefix = prefix[1:] // Use a shorter prefix
@@ -360,8 +360,8 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 			if word == endToken {
 				if len(out) < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
 					attempts++
-					log.Printf("Below minimum sentence length (attempt: %d): '%s'",
-						attempts, strings.Join(out, " "),
+					log.Printf("Len: %-3d Attempt: %-3d '%s'",
+						len(out), attempts, strings.Join(out, " "),
 					)
 					continue
 				}
@@ -372,8 +372,8 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 				strings.Count(word, ".") <= 1 { // Abbreviations shouldn't end sentences
 				if len(out)+1 < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
 					attempts++
-					log.Printf("Below minimum sentence length (attempt: %d): '%s'",
-						attempts, strings.Join(append(out, word), " "),
+					log.Printf("Below min sentence length (attempt: %d): '%s'",
+						len(out)+1, attempts, strings.Join(append(out, word), " "),
 					)
 					continue
 				}
@@ -405,7 +405,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	// predictable)
 	if strings.HasSuffix(input, "?") && len(words) > 0 && rand.Intn(2) > 0 {
 		word := words[len(words)-1]
-		opts := c[word]
+		opts := c[strings.ToLower(word)]
 		if len(opts) > *optionMin {
 			log.Printf("Using question word as prefix")
 			return Prefix{startToken, word}, []string{word}
@@ -425,7 +425,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	if len(words) > *minInputWords || rand.Intn(2) > 0 {
 		// For each valid input word, check if it's a known prefix
 		for _, word := range words {
-			opts := c[word]
+			opts := c[strings.ToLower(word)]
 			// If the word is a known prefix with at least the minimum number
 			// of options in the markov chain, use it
 			if len(opts) > *optionMin {
@@ -510,6 +510,7 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 			}
 			// TODO: Skip automated messages - e.g. "That looks like a Google Drive link"
 
+			log.Printf("------------------------------")
 			log.Printf("Message received: '%s'\n", ev.Text)
 			log.Printf("Message type: %s %s\n", ev.Type, ev.SubType)
 
