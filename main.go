@@ -73,7 +73,7 @@ func main() {
 
 	if *cache != "" {
 		cacheDir = path.Join(*cache, user.Profile.Email)
-		if err := os.MkdirAll(*cache, 0755); err != nil {
+		if err := os.MkdirAll(cacheDir, 0755); err != nil {
 			log.Fatal("Error creating cache directory: %s", err)
 		}
 	}
