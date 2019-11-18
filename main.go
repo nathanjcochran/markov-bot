@@ -37,7 +37,6 @@ var (
 	sentenceMin      = flag.Int("sentence-min", 5, "Target minimum sentence length")
 	sentenceMax      = flag.Int("sentence-max", 20, "Target maximum sentence length")
 	sentenceAttempts = flag.Int("sentence-attempts", 10, "Number of times to try building a sentence longer than minimum")
-	minInputWords    = flag.Int("input-words", 3, "Number of input words required to definitely choose one as the starting prefix")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
 	cache            = flag.String("cache", "./cache", "Cache directory")
 	logDir           = flag.String("logs", "./logs", "Log directory")
@@ -269,6 +268,8 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 		// Split the message into tokens, index each token by its prefix
 		tokens := splitMessage(msg)
 		for _, token := range tokens {
+			token = strings.TrimRight(token, ",")
+
 			// Skip tokens with no alphanumeric characters (probably code fragments)
 			if !strings.ContainsAny(strings.ToLower(token), alphanumericChars) {
 				continue
@@ -322,7 +323,7 @@ func splitMessage(msg string) []string {
 		// but leave end-punctuation ('.', '!', '?'), which is used to
 		// terminate generated sentences along with the endToken
 		switch r {
-		case ';', '[', ']', '{', '}', '(', ')', '|', ',', '"':
+		case ';', '[', ']', '{', '}', '(', ')', '|', '"':
 			return true
 		default:
 			return false
@@ -372,7 +373,7 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 				strings.Count(word, ".") <= 1 { // Abbreviations shouldn't end sentences
 				if len(out)+1 < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
 					attempts++
-					log.Printf("Below min sentence length (attempt: %d): '%s'",
+					log.Printf("Len: %-3d Attempt: %-3d '%s'",
 						len(out)+1, attempts, strings.Join(append(out, word), " "),
 					)
 					continue
@@ -400,74 +401,58 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	words := startWords(input, stopwords)
 	log.Printf("Potential starting words: %v", words)
 
-	// If last word ends with a question mark, try to use that word as prefix.
-	// Only use question words 50% of the time (otherwise, it would be too
-	// predictable)
-	if strings.HasSuffix(input, "?") && len(words) > 0 && rand.Intn(2) > 0 {
-		word := words[len(words)-1]
+	// For each valid input word, check if it's a known prefix
+	for _, word := range words {
 		opts := c[strings.ToLower(word)]
+		// If the word is a known prefix with at least the minimum number
+		// of options in the markov chain, use it
 		if len(opts) > *optionMin {
-			log.Printf("Using question word as prefix")
-			return Prefix{startToken, word}, []string{word}
-		} else {
-			log.Printf("'%s' has too few options: %d",
-				word, len(opts),
-			)
-		}
-	}
-
-	// Randomize order of words
-	rand.Shuffle(len(words), func(i, j int) {
-		words[i], words[j] = words[j], words[i]
-	})
-	// Only use input word 50% of time if the user didn't give many words
-	// (otherwise, it would be too predictable)
-	if len(words) > *minInputWords || rand.Intn(2) > 0 {
-		// For each valid input word, check if it's a known prefix
-		for _, word := range words {
-			opts := c[strings.ToLower(word)]
-			// If the word is a known prefix with at least the minimum number
-			// of options in the markov chain, use it
-			if len(opts) > *optionMin {
-				log.Printf("Using input word as prefix")
-				return Prefix{startToken, word}, []string{word}
+			if word == startToken {
+				break
 			}
-			log.Printf("'%s' has too few options: %d",
-				word, len(opts),
-			)
+			log.Printf("Using prefix: '%s'", word)
+			return Prefix{startToken, word}, []string{word}
 		}
+		log.Printf("'%s' has too few options: %d",
+			word, len(opts),
+		)
 	}
-
-	// Just use the starting token, and let it randomly choose the first word
-	log.Printf("Using random word as prefix")
-	return Prefix{startToken}, nil
+	log.Printf("Using prefix: '%s'", startToken)
+	return Prefix{startToken}, []string{}
 }
 
-func startWords(text string, stopwords map[string]bool) []string {
+func startWords(input string, stopwords map[string]bool) []string {
 	// Split input message (sent from user to trigger bot response) into tokens
 	// for sake of finding work to start markov chain response
-	input := strings.FieldsFunc(text, func(r rune) bool {
-		if unicode.IsSpace(r) {
-			return true
+	words := []string{startToken}
+	for _, word := range splitMessage(input) {
+		// Trim any punctuation on the right (we don't want to start with an
+		// ending-word), except for periods if the word is an abbreviation
+		word = strings.TrimRight(word, ",!?")
+		if strings.Count(word, ".") < 2 {
+			word = strings.TrimRight(word, ".")
 		}
-		switch r {
-		case ';', '[', ']', '{', '}', '(', ')', '|', ',', '"', '\'', '.', '?', '!':
-			return true
-		default:
-			return false
-		}
-	})
 
-	// Filter out empty strings and stopwords
-	var words []string
-	for _, word := range input {
-		if word == "" {
-			continue
-		}
-		if stopwords[strings.ToLower(word)] {
+		// Filter out empty strings and stopwords
+		if word == "" || stopwords[strings.ToLower(word)] {
 			continue
 		}
 		words = append(words, word)
+	}
+
+	// If last word ends with a question mark, try to use that word as prefix.
+	if strings.HasSuffix(input, "?") {
+		// Randomize order of words, except last word (question word)
+		rand.Shuffle(len(words)-1, func(i, j int) {
+			words[i], words[j] = words[j], words[i]
+		})
+		// Swap question word into first place
+		words[0], words[len(words)-1] = words[len(words)-1], words[0]
+	} else {
+		// Randomize order of words
+		rand.Shuffle(len(words), func(i, j int) {
+			words[i], words[j] = words[j], words[i]
+		})
 	}
 	return words
 }
