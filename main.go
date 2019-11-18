@@ -403,7 +403,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 
 	// For each valid input word, check if it's a known prefix
 	for _, word := range words {
-		opts := c[strings.ToLower(word)]
+		opts := c[word]
 		// If the word is a known prefix with at least the minimum number
 		// of options in the markov chain, use it
 		if len(opts) > *optionMin {
@@ -411,7 +411,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 				break
 			}
 			log.Printf("Using prefix: '%s'", word)
-			return Prefix{startToken, word}, []string{word}
+			return Prefix{startToken, word}, []string{strings.Title(word)}
 		}
 		log.Printf("'%s' has too few options: %d",
 			word, len(opts),
@@ -434,7 +434,8 @@ func startWords(input string, stopwords map[string]bool) []string {
 		}
 
 		// Filter out empty strings and stopwords
-		if word == "" || stopwords[strings.ToLower(word)] {
+		word = strings.ToLower(word)
+		if word == "" || stopwords[word] {
 			continue
 		}
 		words = append(words, word)
