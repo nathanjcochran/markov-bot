@@ -36,7 +36,7 @@ var (
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
 	sentenceMin      = flag.Int("sentence-min", 5, "Target minimum sentence length")
 	sentenceMax      = flag.Int("sentence-max", 20, "Target maximum sentence length")
-	sentenceAttempts = flag.Int("sentence-attempts", 5, "Number of times to try building a sentence longer than minimum")
+	sentenceAttempts = flag.Int("sentence-attempts", 10, "Number of times to try building a sentence longer than minimum")
 	minInputWords    = flag.Int("input-words", 3, "Number of input words required to definitely choose one as the starting prefix")
 	stopwordsFile    = flag.String("stopwords", "./stopwords.txt", "Stopwords file")
 	cache            = flag.String("cache", "./cache", "Cache directory")
@@ -55,12 +55,12 @@ func main() {
 	userClient := slack.New(*userToken)
 	botClient := slack.New(*botToken)
 
-	log.Println("Authenticating with user token")
+	log.Printf("Authenticating with user token")
 	if _, err := userClient.AuthTest(); err != nil {
 		log.Fatalf("Error authenticating with user token: %s", err)
 	}
 
-	log.Println("Authenticating with bot token")
+	log.Printf("Authenticating with bot token")
 	botInfo, err := botClient.AuthTest()
 	if err != nil {
 		log.Fatalf("Error authenticating with bot token: %s", err)
@@ -95,7 +95,7 @@ func main() {
 }
 
 func readStopwords() map[string]bool {
-	log.Println("Reading stopwords file: %s", *stopwordsFile)
+	log.Printf("Reading stopwords file: %s", *stopwordsFile)
 	file, err := os.Open(*stopwordsFile)
 	if err != nil {
 		log.Fatalf("Error opening stopwords file: %s", err)
@@ -115,7 +115,7 @@ func readStopwords() map[string]bool {
 }
 
 func fetchChannels(client *slack.Client, botInfo slack.AuthTestResponse) <-chan slack.Channel {
-	log.Println("Fetching list of channels")
+	log.Printf("Fetching list of channels")
 	var (
 		channels = make(chan slack.Channel, *buffer)
 		params   = &slack.GetConversationsParameters{
@@ -147,7 +147,7 @@ func fetchChannels(client *slack.Client, botInfo slack.AuthTestResponse) <-chan 
 }
 
 func fetchChannelHistories(client *slack.Client, user *slack.User, channels <-chan slack.Channel) <-chan string {
-	log.Println("Fetching channel histories")
+	log.Printf("Fetching channel histories")
 	var (
 		msgs = make(chan string, *buffer)
 		wg   sync.WaitGroup
@@ -184,7 +184,7 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 		if file, err := os.Open(filename); err != nil {
 			log.Printf("Error opening cache file: %s", err)
 		} else {
-			log.Printf("Using cache file: %s", filename)
+			log.Printf("Using cache: %s", filename)
 			defer file.Close()
 
 			scanner := bufio.NewScanner(file)
@@ -192,7 +192,7 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 				msgs <- scanner.Text()
 			}
 			if err := scanner.Err(); err != nil {
-				log.Fatalf("Error scanning cache file: %s", err)
+				log.Fatalf("Error scanning from cache file: %s", err)
 			}
 			return
 		}
@@ -331,22 +331,20 @@ func splitMessage(msg string) []string {
 }
 
 func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
-	var (
-		// Choose starting prefix from input, start generating sentence
-		prefix, out = c.startingPrefix(input, stopwords)
-		attempts    int
-	)
+	// Choose starting prefix from input
+	prefix, out := c.startingPrefix(input, stopwords)
 	for {
-		// Get all of the word options for this prefix
+		// Get all of the word options for the current prefix
 		key := prefix.String()
 		opts := c[key]
 
 		// Check if we should use a shorter prefix (because this prefix isn't
 		// generating enough options in the markov chain, and therefore
 		// wouldn't generate a very novel sentence)
-		log.Printf("Prefix: '%s'; Prefix Length: %d; Opts: %d", key, len(prefix), len(opts))
+		log.Printf("Prefix length: %-2d Options: %-5d Prefix: '%s'",
+			len(prefix), len(opts), key,
+		)
 		if useShorterPrefix(prefix, opts, out) {
-			log.Printf("Too few options: %d; Prefix length: %d", len(opts), len(prefix))
 			prefix = prefix[1:] // Use a shorter prefix
 			continue
 		}
@@ -355,36 +353,44 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 		// endToken, or a word that ends with punctuation, end the sentence
 		// (unless we haven't reached the target sentence length yet, and there
 		// are other potential options that don't end the sentence, in which
-		// case, we try again)
-		word := opts[rand.Intn(len(opts))]
-		if word == endToken {
-			if len(out) < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
-				attempts++
-				log.Printf("Below minimum sentence length - trying again")
-				continue
+		// case, try again)
+		var attempts int
+		for {
+			word := opts[rand.Intn(len(opts))]
+			if word == endToken {
+				if len(out) < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
+					attempts++
+					log.Printf("Below minimum sentence length (attempt: %d): '%s'",
+						attempts, strings.Join(out, " "),
+					)
+					continue
+				}
+				return strings.Join(out, " ")
+			} else if (strings.HasSuffix(word, ".") ||
+				strings.HasSuffix(word, "!") ||
+				strings.HasSuffix(word, "?")) &&
+				strings.Count(word, ".") <= 1 { // Abbreviations shouldn't end sentences
+				if len(out)+1 < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
+					attempts++
+					log.Printf("Below minimum sentence length (attempt: %d): '%s'",
+						attempts, strings.Join(append(out, word), " "),
+					)
+					continue
+				}
+				out = append(out, word)
+				return strings.Join(out, " ")
 			}
-			return strings.Join(out, " ")
-		} else if (strings.HasSuffix(word, ".") ||
-			strings.HasSuffix(word, "!") ||
-			strings.HasSuffix(word, "?")) &&
-			strings.Count(word, ".") <= 1 { // Abbreviations shouldn't end sentences
-			if len(out)+1 < *sentenceMin && len(opts) > 1 && attempts < *sentenceAttempts {
-				attempts++
-				log.Printf("Below minimum sentence length - trying again")
-				continue
-			}
+
+			// Append chosen word to sentence
 			out = append(out, word)
-			return strings.Join(out, " ")
-		}
 
-		// Append chosen word to sentence
-		out = append(out, word)
-
-		// Add the chosen word to the prefix, and shift the
-		// sliding window if we've passed max prefix length
-		prefix = append(prefix, word)
-		if len(prefix) > *prefixMax {
-			prefix = prefix[1:]
+			// Add the chosen word to the prefix, and shift the
+			// sliding window if we've passed max prefix length
+			prefix = append(prefix, word)
+			if len(prefix) > *prefixMax {
+				prefix = prefix[1:]
+			}
+			break
 		}
 	}
 }
@@ -394,13 +400,19 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	words := startWords(input, stopwords)
 	log.Printf("Potential starting words: %v", words)
 
-	// If last word ends with a question mark, try to use that 75% of the time
-	// (otherwise, it would be too predictable)
-	if strings.HasSuffix(input, "?") && len(words) > 0 && rand.Intn(4) > 0 {
+	// If last word ends with a question mark, try to use that word as prefix.
+	// Only use question words 50% of the time (otherwise, it would be too
+	// predictable)
+	if strings.HasSuffix(input, "?") && len(words) > 0 && rand.Intn(2) > 0 {
 		word := words[len(words)-1]
-		if len(c[word]) > *optionMin {
-			log.Printf("Using question word as prefix: %s", word)
+		opts := c[word]
+		if len(opts) > *optionMin {
+			log.Printf("Using question word as prefix")
 			return Prefix{startToken, word}, []string{word}
+		} else {
+			log.Printf("'%s' has too few options: %d",
+				word, len(opts),
+			)
 		}
 	}
 
@@ -413,17 +425,21 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 	if len(words) > *minInputWords || rand.Intn(2) > 0 {
 		// For each valid input word, check if it's a known prefix
 		for _, word := range words {
+			opts := c[word]
 			// If the word is a known prefix with at least the minimum number
 			// of options in the markov chain, use it
-			if len(c[word]) > *optionMin {
-				log.Printf("Using random input word as prefix: %s", word)
+			if len(opts) > *optionMin {
+				log.Printf("Using input word as prefix")
 				return Prefix{startToken, word}, []string{word}
 			}
+			log.Printf("'%s' has too few options: %d",
+				word, len(opts),
+			)
 		}
 	}
 
 	// Just use the starting token, and let it randomly choose the first word
-	log.Printf("Using random starting word as prefix")
+	log.Printf("Using random word as prefix")
 	return Prefix{startToken}, nil
 }
 
@@ -492,8 +508,10 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 			if ev.BotID != "" {
 				continue
 			}
+			// TODO: Skip automated messages - e.g. "That looks like a Google Drive link"
 
-			log.Printf("Message received: %v\n", ev.Text)
+			log.Printf("Message received: '%s'\n", ev.Text)
+			log.Printf("Message type: %s %s\n", ev.Type, ev.SubType)
 
 			// Fetch channel the message was from (cache for future reference)
 			channel, exists := channels[ev.Channel]
@@ -527,7 +545,7 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 				response,
 				ev.Channel,
 			))
-			log.Printf("Message sent: %v\n", response)
+			log.Printf("Message sent: '%s'\n", response)
 
 			// Log message
 			if *logDir != "" {
@@ -558,17 +576,17 @@ func logMessages(channel slack.Channel, userName, botName, msg, response string)
 
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Println("Error opening log file for writing: %s", err)
+		log.Printf("Error opening log file for writing: %s", err)
 		return
 	}
 	defer f.Close()
 	msg = fmt.Sprintf("[%s] %s\n", userName, msg)
 	if _, err := f.WriteString(msg); err != nil {
-		log.Println("Error appending message to log file: %s", err)
+		log.Printf("Error appending message to log file: %s", err)
 	}
 
 	response = fmt.Sprintf("[%s] %s\n", botName, response)
 	if _, err := f.WriteString(response); err != nil {
-		log.Println("Error appending response to log file: %s", err)
+		log.Printf("Error appending response to log file: %s", err)
 	}
 }
