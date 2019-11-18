@@ -425,7 +425,7 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 func startWords(input string, stopwords map[string]bool) []string {
 	// Split input message (sent from user to trigger bot response) into tokens
 	// for sake of finding work to start markov chain response
-	words := []string{startToken}
+	var words []string
 	for _, word := range splitMessage(input) {
 		// Trim any punctuation on the right (we don't want to start with an
 		// ending-word), except for periods if the word is an abbreviation
@@ -445,6 +445,7 @@ func startWords(input string, stopwords map[string]bool) []string {
 	rand.Shuffle(len(words), func(i, j int) {
 		words[i], words[j] = words[j], words[i]
 	})
+	words = append(words, startToken)
 	return words
 }
 
