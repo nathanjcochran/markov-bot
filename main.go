@@ -25,6 +25,8 @@ const (
 	alphanumericChars = "abcdefghijklmnopqrstuvwxyz1234567890"
 )
 
+var channelTypes = []string{"public_channel", "private_channel", "mpim", "im"}
+
 var (
 	userToken        = flag.String("user-token", "", "Slack user token")
 	botToken         = flag.String("bot-token", "", "Slack bot token")
@@ -41,9 +43,8 @@ var (
 	logDir           = flag.String("logs", "./logs", "Log directory")
 	buffer           = flag.Int("buffer", 1000, "Buffer size")
 	concurrency      = flag.Int("concurrency", 3, "Concurrency")
+	cacheDir         string
 )
-
-var cacheDir string
 
 func main() {
 	if err := ff.Parse(flag.CommandLine, os.Args[1:], ff.WithEnvVarNoPrefix()); err != nil {
@@ -85,7 +86,7 @@ func main() {
 	}
 
 	stopwords := readStopwords()
-	channels := fetchChannels(userClient)
+	channels := fetchChannels(userClient, *botInfo)
 	msgs := fetchChannelHistories(userClient, user, channels)
 	chain := buildMarkovChain(msgs)
 	startBot(botClient, *botInfo, chain, stopwords)
@@ -113,12 +114,12 @@ func readStopwords() map[string]bool {
 	return stopwords
 }
 
-func fetchChannels(client *slack.Client) <-chan slack.Channel {
+func fetchChannels(client *slack.Client, botInfo slack.AuthTestResponse) <-chan slack.Channel {
 	log.Println("Fetching list of channels")
 	var (
 		channels = make(chan slack.Channel, *buffer)
 		params   = &slack.GetConversationsParameters{
-			Types: []string{"public_channel", "private_channel", "mpim", "im"},
+			Types: channelTypes,
 			Limit: limit,
 		}
 	)
@@ -130,6 +131,10 @@ func fetchChannels(client *slack.Client) <-chan slack.Channel {
 				log.Fatalf("Error getting channels: %s", err)
 			}
 			for _, c := range chans {
+				if c.IsIM && c.User == botInfo.UserID {
+					log.Printf("Skipping DM with %s: %s", botInfo.User, c.ID)
+					continue
+				}
 				channels <- c
 			}
 			if cursor == "" {
