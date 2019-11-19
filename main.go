@@ -94,7 +94,7 @@ func main() {
 	stopwords := readStopwords()
 	channels := fetchChannels(userClient, *botInfo)
 	msgs := fetchChannelHistories(userClient, user, channels)
-	chain := buildMarkovChain(msgs)
+	chain := buildMarkovChain(*botInfo, msgs)
 	startBot(botClient, *botInfo, chain, stopwords)
 
 	log.Printf("Goodbye!")
@@ -264,7 +264,7 @@ func (p Prefix) String() string {
 	return strings.ToLower(strings.Join(p, " "))
 }
 
-func buildMarkovChain(msgs <-chan string) MarkovChain {
+func buildMarkovChain(botInfo slack.AuthTestResponse, msgs <-chan string) MarkovChain {
 	chain := MarkovChain{}
 
 	for msg := range msgs {
@@ -281,6 +281,10 @@ func buildMarkovChain(msgs <-chan string) MarkovChain {
 
 			// Skip tokens with no alphanumeric characters (probably code fragments)
 			if !strings.ContainsAny(strings.ToLower(token), alphanumericChars) {
+				continue
+			}
+			// Skip tokens that represent a bot mention
+			if strings.ContainsAny(strings.ToLower(token), botInfo.UserID) {
 				continue
 			}
 
@@ -332,7 +336,7 @@ func splitMessage(msg string) []string {
 		// but leave end-punctuation ('.', '!', '?'), which is used to
 		// terminate generated sentences along with the endToken
 		switch r {
-		case ';', '[', ']', '{', '}', '(', ')', '|', '"':
+		case ';', '<', '>', '[', ']', '{', '}', '(', ')', '|', '"':
 			return true
 		default:
 			return false
