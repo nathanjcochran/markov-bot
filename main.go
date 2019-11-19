@@ -169,13 +169,7 @@ func fetchChannelHistories(client *slack.Client, user *slack.User, channels <-ch
 }
 
 func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.Channel, msgs chan<- string) {
-	var channelName string
-	if channel.Name != "" {
-		channelName = channel.Name
-	} else {
-		channelName = channel.ID
-	}
-
+	channelName := getChannelName(channel)
 	log.Printf("Fetching channel history: %s", channelName)
 
 	filename := path.Join(cacheDir, fmt.Sprintf("%s.txt", channelName))
@@ -243,6 +237,15 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 		if err := ioutil.WriteFile(filename, []byte(out), 0755); err != nil {
 			log.Fatalf("Error writing file: %s", err)
 		}
+	}
+}
+
+// TODO: Name DMs after user, like log files
+func getChannelName(channel slack.Channel) string {
+	if channel.Name != "" {
+		return channel.Name
+	} else {
+		return channel.ID
 	}
 }
 
@@ -489,7 +492,7 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 
 			log.Printf("------------------------------")
 			log.Printf("Message received: '%s'\n", ev.Text)
-			log.Printf("Message type: %s %s\n", ev.Type, ev.SubType)
+			log.Printf("Type: %s %s\n", ev.Type, ev.SubType)
 
 			// Fetch channel the message was from (cache for future reference)
 			channel, exists := channels[ev.Channel]
@@ -503,16 +506,20 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 				channel = *c
 			}
 
-			// Only respond to DMs, or if the bot was mentioned
-			if !(channel.IsIM || strings.Contains(ev.Text, botInfo.UserID)) {
-				log.Printf("Skipping - not a DM, and doesn't mention bot")
-				continue
-			}
+			log.Printf("Channel: %s\n", getChannelName(channel))
 
 			// Fetch user the message was from (cache for future reference)
 			user, err := botClient.GetUserInfo(ev.User)
 			if err != nil {
 				log.Printf("Error getting user info for user: %s: %s", ev.User, err)
+				continue
+			}
+
+			log.Printf("User: %s\n", user.Name)
+
+			// Only respond to DMs, or if the bot was mentioned
+			if !(channel.IsIM || strings.Contains(ev.Text, botInfo.UserID)) {
+				log.Printf("Skipping - not a DM, and doesn't mention bot")
 				continue
 			}
 
