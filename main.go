@@ -280,11 +280,12 @@ func buildMarkovChain(botInfo slack.AuthTestResponse, msgs <-chan string) Markov
 			token = strings.TrimRight(token, ",")
 
 			// Skip tokens with no alphanumeric characters (probably code fragments)
-			if !strings.ContainsAny(strings.ToLower(token), alphanumericChars) {
+			lower := strings.ToLower(token)
+			if !strings.ContainsAny(lower, alphanumericChars) {
 				continue
 			}
 			// Skip tokens that represent a bot mention
-			if strings.ContainsAny(strings.ToLower(token), botInfo.UserID) {
+			if strings.Contains(lower, strings.ToLower(botInfo.UserID)) {
 				continue
 			}
 
