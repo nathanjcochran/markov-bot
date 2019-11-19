@@ -25,12 +25,11 @@ const (
 	alphanumericChars = "abcdefghijklmnopqrstuvwxyz1234567890"
 )
 
-var channelTypes = []string{"public_channel", "private_channel", "mpim", "im"}
-
 var (
 	userToken        = flag.String("user-token", "", "Slack user token")
 	botToken         = flag.String("bot-token", "", "Slack bot token")
 	email            = flag.String("email", "", "Email address of slack user to create bot for")
+	channelTypesStr  = flag.String("channel-types", "public_channel,private_channel,mpim,im", "Types of channels to pull messages from")
 	optionMin        = flag.Int("option-min", 2, "Minimum number of options before downgrading to shorter prefix")
 	prefixMax        = flag.Int("prefix-max", 5, "Maximum prefix length")
 	prefixMin        = flag.Int("prefix-min", 2, "Minimum prefix length, even if below option-min")
@@ -42,6 +41,7 @@ var (
 	logDir           = flag.String("logs", "./logs", "Log directory")
 	buffer           = flag.Int("buffer", 1000, "Buffer size")
 	concurrency      = flag.Int("concurrency", 3, "Concurrency")
+	channelTypes     []string
 	cacheDir         string
 )
 
@@ -50,6 +50,7 @@ func main() {
 		log.Fatalf("Error parsing flags: %s", err)
 	}
 	rand.Seed(time.Now().UnixNano())
+	channelTypes = strings.Split(*channelTypesStr, ",")
 
 	userClient := slack.New(*userToken)
 	botClient := slack.New(*botToken)
