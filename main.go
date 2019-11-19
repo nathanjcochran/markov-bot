@@ -336,7 +336,7 @@ func splitMessage(msg string) []string {
 		// but leave end-punctuation ('.', '!', '?'), which is used to
 		// terminate generated sentences along with the endToken
 		switch r {
-		case ';', '<', '>', '[', ']', '{', '}', '(', ')', '|', '"':
+		case ';', '[', ']', '{', '}', '(', ')', '|', '"':
 			return true
 		default:
 			return false
