@@ -423,10 +423,14 @@ func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Pr
 
 		// If the word is a known prefix with at least the minimum number
 		// of options in the markov chain, use it
-		opts := c[word]
+		opts := c[strings.ToLower(word)]
 		if len(opts) > *optionMin {
+			// Mentions look like <@USER_ID>, and have to be capitalized
+			if !(strings.HasPrefix(word, "<@") && strings.HasSuffix(word, ">")) {
+				word = strings.Title(word)
+			}
 			log.Printf("Using prefix: '%s'", word)
-			return Prefix{startToken, word}, []string{strings.Title(word)}
+			return Prefix{startToken, word}, []string{word}
 		}
 		log.Printf("'%s' has too few options: %d",
 			word, len(opts),
@@ -449,8 +453,7 @@ func startWords(input string, stopwords map[string]bool) []string {
 		}
 
 		// Filter out empty strings and stopwords
-		word = strings.ToLower(word)
-		if word == "" || stopwords[word] {
+		if word == "" || stopwords[strings.ToLower(word)] {
 			continue
 		}
 		words = append(words, word)
