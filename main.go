@@ -66,13 +66,19 @@ func main() {
 	}
 
 	log.Printf("Fetching user info for user: %s", *email)
-	user, err := userClient.GetUserByEmail(*email)
-	if err != nil {
-		log.Fatalf("Error fetching user by email: %s", err)
+	var user *slack.User
+	if *email != "" {
+		user, err = userClient.GetUserByEmail(*email)
+		if err != nil {
+			log.Fatalf("Error fetching user by email: %s", err)
+		}
 	}
 
 	if *cache != "" {
-		cacheDir = path.Join(*cache, user.Profile.Email)
+		cacheDir = path.Join(*cache, botInfo.Team)
+		if *email != "" {
+			cacheDir = path.Join(*cache, user.Profile.Email)
+		}
 		if err := os.MkdirAll(cacheDir, 0755); err != nil {
 			log.Fatal("Error creating cache directory: %s", err)
 		}
@@ -217,7 +223,7 @@ func fetchChannelHistory(client *slack.Client, user *slack.User, channel slack.C
 
 		// Filter messages by user
 		for _, msg := range resp.Messages {
-			if msg.User != user.ID {
+			if user != nil && msg.User != user.ID {
 				continue
 			}
 			msgs <- msg.Text
