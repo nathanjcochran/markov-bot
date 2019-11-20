@@ -412,7 +412,7 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 
 func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Prefix, []string) {
 	// Jeopardy hack
-	if strings.TrimSpace(strings.ToLower(input)) == "play jeopardy" {
+	if strings.Contains(strings.ToLower(input), "play jeopardy") {
 		return Prefix{startToken, "What", "is"}, []string{"What", "is"}
 	}
 
