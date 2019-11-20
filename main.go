@@ -411,6 +411,11 @@ func (c MarkovChain) Generate(input string, stopwords map[string]bool) string {
 }
 
 func (c MarkovChain) startingPrefix(input string, stopwords map[string]bool) (Prefix, []string) {
+	// Jeopardy hack
+	if strings.Contains(strings.ToLower(input), "jeopardy") {
+		return Prefix{startToken, "What", "is"}, []string{"What", "is"}
+	}
+
 	// Get a list of valid words from the input message
 	words := startWords(input, stopwords)
 	log.Printf("Potential starting words: %v", words)
