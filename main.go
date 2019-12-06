@@ -537,6 +537,23 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 
 			log.Printf("User: %s\n", user.Name)
 
+			if ev.Type == "message" && ev.SubType == "channel_join" && ev.User == botInfo.UserID {
+				rtm.SendMessage(rtm.NewTypingMessage(ev.Channel))
+				response := "Hello!"
+				time.Sleep(time.Second / 3) // Mimicks typing
+				rtm.SendMessage(rtm.NewOutgoingMessage(
+					response,
+					ev.Channel,
+				))
+				log.Printf("Message sent: '%s'\n", response)
+
+				// Log message
+				if *logDir != "" {
+					logMessages(channel, user.Name, botInfo.User, ev.Text, response)
+				}
+				continue
+			}
+
 			// Only respond to DMs, or if the bot was mentioned
 			if !(channel.IsIM || strings.Contains(ev.Text, botInfo.UserID)) {
 				log.Printf("Skipping - not a DM, and doesn't mention bot")
