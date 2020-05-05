@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	userMentionRegex = regexp.MustCompile(`<@.*>`)
+	userMentionRegex = regexp.MustCompile(`<@(\w*)>`)
 	burritoCount     = map[string]int{}
 )
 
@@ -561,13 +561,36 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 			}
 
 			// Handle tacos
-			mentions := userMentionRegex.FindAllString(ev.Text, -1)
-			burritos := strings.Count(":burrito:", ev.Text)
+			mentions := userMentionRegex.FindAllStringSubmatch(ev.Text, -1)
+			fmt.Println(mentions)
+			burritos := strings.Count(ev.Text, ":burrito:")
 			if len(mentions) > 0 && burritos > 0 {
 				for _, mention := range mentions {
-					log.Printf("%s got %d burritos", mention, burritos)
-					burritoCount[mention] += burritos
+					userID := mention[1]
+					log.Printf("%s got %d burritos", userID, burritos)
+
+					burritoCount[userID] += burritos
+					total := burritoCount[userID]
+
+					var response string
+					if burritos == 1 {
+						response = fmt.Sprintf("You got 1 burrito from %s! You now have %d burritos!", user.Name, total)
+					} else {
+						response = fmt.Sprintf("You got %d burritos from %s! You now have %d burritos!", burritos, user.Name, total)
+					}
+					_, _, channel, err := botClient.OpenIMChannel(userID)
+					if err != nil {
+						log.Printf("Error opening IM channel for user: %s: %s", user.Name, err)
+						continue
+					}
+					rtm.SendMessage(rtm.NewOutgoingMessage(
+						response,
+						channel,
+					))
+					log.Printf("Message sent: '%s'\n", response)
 				}
+
+				continue
 			}
 
 			// Only respond to DMs, or if the bot was mentioned
