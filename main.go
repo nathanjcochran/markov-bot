@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,11 @@ const (
 	startToken        = "^"
 	endToken          = "$"
 	alphanumericChars = "abcdefghijklmnopqrstuvwxyz1234567890"
+)
+
+var (
+	userMentionRegex = regexp.MustCompile(`<@.*>`)
+	burritoCount     = map[string]int{}
 )
 
 var (
@@ -552,6 +558,16 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 					logMessages(channel, user.Name, botInfo.User, ev.Text, response)
 				}
 				continue
+			}
+
+			// Handle tacos
+			mentions := userMentionRegex.FindAllString(ev.Text, -1)
+			burritos := strings.Count(":burrito:", ev.Text)
+			if len(mentions) > 0 && burritos > 0 {
+				for _, mention := range mentions {
+					log.Printf("%s got %d burritos", mention, burritos)
+					burritoCount[mention] += burritos
+				}
 			}
 
 			// Only respond to DMs, or if the bot was mentioned
