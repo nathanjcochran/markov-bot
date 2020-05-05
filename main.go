@@ -580,7 +580,7 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 					}
 					_, _, channel, err := botClient.OpenIMChannel(userID)
 					if err != nil {
-						log.Printf("Error opening IM channel for user: %s: %s", user.Name, err)
+						log.Printf("Error opening IM channel for user: %s: %s", userID, err)
 						continue
 					}
 					rtm.SendMessage(rtm.NewOutgoingMessage(
