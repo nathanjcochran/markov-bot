@@ -590,7 +590,7 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 						notification = fmt.Sprintf("You gave 1 burrito to %s! You have given a total of %d burritos!", recipient.Name, given)
 						response = fmt.Sprintf("You got 1 burrito from %s! You now have %d burritos!", user.Name, total)
 					} else {
-						notification = fmt.Sprintf("You gave %d burritos to %s! You have given a total of %d burritos!", recipient.Name, burritos, given)
+						notification = fmt.Sprintf("You gave %d burritos to %s! You have given a total of %d burritos!", burritos, recipient.Name, given)
 						response = fmt.Sprintf("You got %d burritos from %s! You now have %d burritos!", burritos, user.Name, total)
 					}
 
