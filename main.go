@@ -29,6 +29,7 @@ const (
 var (
 	userMentionRegex = regexp.MustCompile(`<@(\w*)>`)
 	burritoCount     = map[string]int{}
+	givenCount       = map[string]int{}
 )
 
 var (
@@ -569,25 +570,51 @@ func startBot(botClient *slack.Client, botInfo slack.AuthTestResponse, chain Mar
 					userID := mention[1]
 					log.Printf("%s got %d burritos", userID, burritos)
 
+					recipient, err := botClient.GetUserInfo(userID)
+					if err != nil {
+						log.Printf("Error getting user info for user: %s: %s", ev.User, err)
+						continue
+					}
+
 					burritoCount[userID] += burritos
 					total := burritoCount[userID]
 
-					var response string
+					givenCount[user.ID] += burritos
+					given := givenCount[user.ID]
+
+					var (
+						notification string
+						response     string
+					)
 					if burritos == 1 {
+						notification = fmt.Sprintf("You gave 1 burrito to %s! You have given a total of %d burritos!", recipient.Name, given)
 						response = fmt.Sprintf("You got 1 burrito from %s! You now have %d burritos!", user.Name, total)
 					} else {
+						notification = fmt.Sprintf("You gave %d burritos to %s! You have given a total of %d burritos!", recipient.Name, burritos, given)
 						response = fmt.Sprintf("You got %d burritos from %s! You now have %d burritos!", burritos, user.Name, total)
 					}
-					_, _, channel, err := botClient.OpenIMChannel(userID)
+
+					_, _, recipientChannel, err := botClient.OpenIMChannel(userID)
 					if err != nil {
 						log.Printf("Error opening IM channel for user: %s: %s", userID, err)
 						continue
 					}
 					rtm.SendMessage(rtm.NewOutgoingMessage(
 						response,
-						channel,
+						recipientChannel,
 					))
-					log.Printf("Message sent: '%s'\n", response)
+					log.Printf("Message sent to %s: '%s'\n", recipient.Name, response)
+
+					_, _, notificationChannel, err := botClient.OpenIMChannel(user.ID)
+					if err != nil {
+						log.Printf("Error opening IM channel for user: %s: %s", user.ID, err)
+						continue
+					}
+					rtm.SendMessage(rtm.NewOutgoingMessage(
+						notification,
+						notificationChannel,
+					))
+					log.Printf("Message sent to %s: '%s'\n", user.Name, notification)
 				}
 
 				continue
