@@ -31,3 +31,6 @@ cache
 
 # Log directory
 logs
+
+# Start script
+start.sh
